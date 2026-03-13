@@ -69,7 +69,7 @@ def load_model():
 @st.cache_data
 def load_data():
     return pd.read_csv("data/diabetes.csv")
-
+model1 = joblib.load("model/medipredict_model.pkl")
 model, scaler = load_model()
 df = load_data()
 
@@ -83,9 +83,7 @@ MODEL_METRICS = {
     "auc": 0.79
 }
 
-# Si tu as déjà calculé y_test, y_pred, y_proba dans ton notebook,
-# tu peux les sauvegarder puis les recharger ici.
-# En attendant, on met None pour éviter erreur.
+
 y_true_demo = None
 y_pred_demo = None
 y_proba_demo = None
@@ -291,52 +289,153 @@ elif page == "Mon profil de risque":
         st.write(f"**Niveau de risque estimé : {st.session_state.risk_category}**")
         st.caption("Le résultat est présenté comme un niveau de risque et non comme un diagnostic médical.")
 
+
+
 # =========================
 # Page 3 — Comprendre ma prédiction
 # =========================
+
 elif page == "Comprendre ma prédiction":
+    # from src.explain import get_shap_values,
+    from src.explain import get_shap_values, generate_model_decision_explanation
+
     st.markdown('<div class="main-title">Comprendre ma prédiction</div>', unsafe_allow_html=True)
 
     if not st.session_state.prediction_done:
         st.info("Veuillez d'abord effectuer une analyse sur la page 'Mon profil de risque'.")
         st.stop()
 
-    st.subheader("Explication locale du résultat")
+    st.subheader("Interprétation du résultat")
 
-    X_user = st.session_state.processed_input
-    shap_values, feature_names, feature_values = get_shap_values(model, scaler, X_user)
+    probability = st.session_state.risk_probability
+    risk = st.session_state.risk_category
 
-    shap_df = pd.DataFrame({
-        "Variable": feature_names,
-        "Valeur": feature_values,
-        "Impact_SHAP": shap_values
-    }).sort_values("Impact_SHAP", key=np.abs, ascending=False)
-
-    st.write("Variables ayant le plus influencé la prédiction :")
-    st.dataframe(shap_df, use_container_width=True)
-
-    explanation = generate_natural_explanation(
-        shap_df=shap_df,
-        risk_category=st.session_state.risk_category
+    st.info(
+        f"Votre estimation de risque est **{risk.lower()}** "
+        f"(probabilité estimée : {probability:.2f}).\n\n"
+        "Cette estimation est produite par un modèle de machine learning "
+        "entraîné sur le dataset Pima Indians Diabetes."
     )
 
-    st.subheader("Explication en langage naturel")
+    # -----------------------------
+    # Calcul SHAP
+    # -----------------------------
+
+    X_user = st.session_state.processed_input
+
+    shap_df, explainer, shap_values = get_shap_values(
+        model,
+        scaler,
+        X_user
+    )
+
+    # -----------------------------
+    # Variables importantes
+    # -----------------------------
+
+    st.subheader("Variables ayant le plus influencé la prédiction")
+
+    st.dataframe(shap_df, use_container_width=True)
+
+    # -----------------------------
+    # Explication décision modèle
+    # -----------------------------
+
+    st.subheader("Comment le modèle a pris sa décision")
+
+    explanation = generate_model_decision_explanation(
+        shap_df,
+        probability,
+        risk
+    )
+
     st.write(explanation)
 
+    # -----------------------------
+    # Graphique SHAP
+    # -----------------------------
+
+    st.subheader("Contribution des variables à la prédiction")
+
+    import shap
+
+    shap.waterfall_plot(
+        shap.Explanation(
+            values=shap_values[0],
+            base_values=explainer.expected_value,
+            data=X_user.iloc[0],
+            feature_names=X_user.columns
+        )
+    )
+
+    st.pyplot(plt.gcf())
+
+    st.caption(
+        "Ce graphique montre comment chaque variable influence la prédiction : "
+        "les variables en rouge augmentent le risque estimé, celles en bleu le réduisent."
+    )
+
+    # -----------------------------
+    # Comparaison dataset
+    # -----------------------------
+
     st.subheader("Comparaison avec le dataset")
+
     fig = plot_feature_distributions(df, st.session_state.user_input)
+
     st.pyplot(fig)
 
-    st.subheader("Recommandations génériques")
+    # -----------------------------
+    # Explication naturelle
+    # -----------------------------
+
+    st.subheader("Explication en langage simple")
+
+    top_features = shap_df.head(3)
+
+    increase_risk = top_features[top_features["Impact_SHAP"] > 0]
+    decrease_risk = top_features[top_features["Impact_SHAP"] < 0]
+
+    explanation = f"Votre estimation de risque est **{risk.lower()}**.\n\n"
+
+    if not increase_risk.empty:
+        explanation += "Les facteurs qui augmentent cette estimation sont :\n"
+        for _, row in increase_risk.iterrows():
+            explanation += f"- **{row['Variable']}** (valeur : {row['Valeur']})\n"
+
+    if not decrease_risk.empty:
+        explanation += "\nLes facteurs qui réduisent cette estimation sont :\n"
+        for _, row in decrease_risk.iterrows():
+            explanation += f"- **{row['Variable']}** (valeur : {row['Valeur']})\n"
+
+    explanation += """
+
+Ces variables influencent la prédiction car elles sont associées,
+dans les données utilisées pour entraîner le modèle, à un risque
+plus ou moins élevé de diabète.
+
+Il est important de rappeler que cette estimation est statistique
+et ne constitue pas un diagnostic médical.
+"""
+
+    st.write(explanation)
+    # -----------------------------
+    # Recommandations
+    # -----------------------------
+
+    st.subheader("Recommandations générales")
+
     st.write(
         """
         - Un taux de glucose élevé peut être un facteur de risque important.
-        - L'IMC et l'âge peuvent aussi influencer l'estimation.
-        - Cette application ne fournit pas de diagnostic.
-        - En cas d'inquiétude, consultez un professionnel de santé.
+        - Maintenir un poids équilibré peut réduire le risque de diabète.
+        - Une activité physique régulière est recommandée.
+        - Une alimentation équilibrée peut contribuer à améliorer la santé métabolique.
+
+        ⚠️ Cet outil est uniquement un outil de sensibilisation.
+        En cas d'inquiétude, consultez un professionnel de santé.
         """
     )
-
 # =========================
 # Page 4 — Explorer les données
 # =========================

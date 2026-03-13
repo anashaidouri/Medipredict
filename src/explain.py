@@ -1,19 +1,6 @@
-import numpy as np
-import pandas as pd
 import shap
-
-def get_shap_values(model, scaler, X_user: pd.DataFrame):
-    X_scaled = scaler.transform(X_user)
-
-    # Pour la régression logistique ou arbre compatible
-    explainer = shap.Explainer(model, X_scaled)
-    shap_exp = explainer(X_scaled)
-
-    shap_values = shap_exp.values[0]
-    feature_names = list(X_user.columns)
-    feature_values = X_user.iloc[0].values
-
-    return shap_values, feature_names, feature_values
+import pandas as pd
+import numpy as np
 
 def generate_natural_explanation(shap_df: pd.DataFrame, risk_category: str):
     top_features = shap_df.head(3)
@@ -40,3 +27,63 @@ def generate_natural_explanation(shap_df: pd.DataFrame, risk_category: str):
     )
 
     return " ".join(parts)
+
+def get_shap_values(model, scaler, X_user):
+
+    X_scaled = scaler.transform(X_user)
+
+    explainer = shap.LinearExplainer(model, X_scaled)
+
+    shap_values = explainer.shap_values(X_scaled)
+
+    feature_names = X_user.columns
+    feature_values = X_user.iloc[0].values
+
+    shap_df = pd.DataFrame({
+        "Variable": feature_names,
+        "Valeur": feature_values,
+        "Impact_SHAP": shap_values[0]
+    })
+
+    shap_df = shap_df.sort_values("Impact_SHAP", key=np.abs, ascending=False)
+
+    return shap_df, explainer, shap_values
+
+
+def generate_model_decision_explanation(shap_df, probability, risk_category):
+
+    text = ""
+
+    text += (
+        f"Le modèle estime une probabilité de diabète de **{probability:.2f}**, "
+        f"ce qui correspond à un niveau de risque **{risk_category.lower()}**.\n\n"
+    )
+
+    text += (
+        "Cette estimation est obtenue en combinant l'influence de plusieurs "
+        "variables médicales présentes dans le modèle.\n\n"
+    )
+
+    top_features = shap_df.head(4)
+
+    text += "Les variables qui ont le plus influencé la décision du modèle sont :\n\n"
+
+    for _, row in top_features.iterrows():
+
+        var = row["Variable"]
+        val = row["Valeur"]
+        impact = row["Impact_SHAP"]
+
+        if impact > 0:
+            direction = "augmente"
+        else:
+            direction = "réduit"
+
+        text += f"- **{var} ({val})** {direction} l'estimation du risque.\n"
+
+    text += (
+        "\nLe modèle combine ensuite l'effet de toutes les variables pour produire "
+        "une estimation globale du risque."
+    )
+
+    return text
