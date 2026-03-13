@@ -192,7 +192,7 @@ elif page == "Mon profil de risque":
             glucose = st.number_input(
                 "Taux de glucose",
                 min_value=0,
-                max_value=250,
+                max_value=500,
                 value=120,
                 help="Valeur biologique plausible : environ 40 à 250."
             )
@@ -343,6 +343,10 @@ elif page == "Comprendre ma prédiction":
 elif page == "Explorer les données":
     st.markdown('<div class="main-title">Explorer les données</div>', unsafe_allow_html=True)
 
+    if not st.session_state.consent_given:
+        st.warning("Veuillez d'abord donner votre consentement sur la page Accueil.")
+        st.stop()
+    
     st.subheader("Aperçu du dataset")
     st.dataframe(df.head(), use_container_width=True)
 
